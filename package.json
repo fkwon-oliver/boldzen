@@ -1,0 +1,43 @@
+{
+  "name": "zendesk-to-bolddesk-migrator",
+  "version": "0.1.0",
+  "description": "Lean migration tool for phased Zendesk to BoldDesk transition",
+  "main": "dist/cli/index.js",
+  "bin": {
+    "migrate": "dist/cli/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/cli/index.js",
+    "dev": "ts-node src/cli/index.ts",
+    "test": "jest --forceExit",
+    "test:watch": "jest --watch",
+    "lint": "eslint src/ --ext .ts",
+    "db:migrate": "ts-node src/persistence/run-migrations.ts"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "license": "UNLICENSED",
+  "private": true,
+  "dependencies": {
+    "axios": "^1.7.0",
+    "commander": "^12.1.0",
+    "dotenv": "^16.4.0",
+    "pg": "^8.13.0",
+    "pino": "^9.5.0",
+    "p-queue": "^8.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/pg": "^8.11.0",
+    "@types/jest": "^29.5.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.2.0",
+    "ts-node": "^10.9.0",
+    "typescript": "^5.6.0",
+    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@typescript-eslint/parser": "^8.0.0",
+    "eslint": "^9.0.0"
+  }
+}

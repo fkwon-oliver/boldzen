@@ -1,0 +1,30 @@
+---
+description: Coding and implementation standards for this repository.
+alwaysApply: true
+---
+
+# Coding Rules
+
+## Standards
+- keep modules small and focused
+- define interfaces before deep implementation
+- use explicit types
+- add comments only where they clarify assumptions or tricky behavior
+- log important migration and reconciliation events
+- do not silently swallow failures
+
+## Implementation Preferences
+- connectors should wrap external API behavior cleanly
+- transformers should be deterministic and testable
+- repositories should be simple and auditable
+- migration services should be resumable where possible
+- reconciliation should be batch-oriented and easy to inspect
+
+## Testing Focus
+Prioritize tests for:
+- status mapping
+- comment visibility mapping
+- chronology preservation
+- attachment workflow
+- idempotent reruns
+- reconciliation mismatch detection

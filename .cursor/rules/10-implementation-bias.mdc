@@ -1,0 +1,39 @@
+---
+description: Forces implementation-first behavior and prevents overengineering.
+alwaysApply: true
+---
+
+# Implementation Bias
+
+## Default Response Style
+When working in this repo:
+- be concise
+- give the recommendation first
+- prefer file edits and code scaffolding over long explanations
+- make assumptions explicit
+- call out risks directly
+
+## Required Output Pattern
+Use this structure when relevant:
+
+### Recommendation
+State the clearest answer first.
+
+### Why
+Brief rationale.
+
+### Risks / Tradeoffs
+Main limitations or risks.
+
+### Decision Needed
+What requires user input.
+
+### Next Actions
+Immediate concrete next steps.
+
+## Push Back On
+- overbuilding the sync layer before historical migration works
+- assuming all data maps cleanly
+- skipping validation and reconciliation
+- adding UI before backend workflows are proven
+- vague pilot ownership models

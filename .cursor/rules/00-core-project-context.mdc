@@ -1,0 +1,61 @@
+---
+description: Core project context and decision-making rules for the Zendesk to BoldDesk migration tool.
+alwaysApply: true
+---
+
+# Zendesk to BoldDesk Migration - Core Project Context
+
+## Mission
+Build a lean, reliable migration tool and pilot coexistence model to support a phased migration from Zendesk to BoldDesk.
+
+The tool and project must prioritize:
+- historical migration fidelity
+- explicit ownership controls during pilot
+- reconciliation and auditability
+- low operational ambiguity
+- safe cutover and decommission planning
+
+## Execution Bias
+- Default to implementation over discussion
+- Prefer code, schemas, interfaces, scripts, workflows, and tests over essays
+- Propose the smallest viable solution first
+- Separate MVP from future enhancements clearly
+- Do not over-engineer
+- Use TODOs where API behavior is uncertain instead of inventing unsupported behavior
+
+## Core Rules
+- Historical migration and live sync are different problems and must be designed separately
+- Do not assume Zendesk maps 1:1 to BoldDesk
+- Do not skip ID mapping tables
+- Do not skip reconciliation
+- Do not build full real-time bi-directional sync unless explicitly required
+- Do not rely on human coordination alone during pilot
+
+## Primary Objectives
+1. Migrate historical Zendesk data to BoldDesk
+2. Preserve comments, internal notes, attachments, contacts, organizations, tags, and key metadata
+3. Support pilot ownership controls so BoldDesk-owned tickets are clearly marked in Zendesk
+4. Produce audit logs, retry support, and reconciliation output
+
+## Default Build Order
+1. mapping and representative sample analysis
+2. source connector
+3. transformation layer
+4. destination connector
+5. mapping persistence
+6. historical migration flow
+7. attachment handling
+8. reconciliation
+9. retry logic
+10. pilot ownership controls
+11. limited sync logic
+
+## What Good Looks Like
+A good implementation:
+- migrates representative tickets with high fidelity
+- preserves chronology and visibility of comments/notes
+- handles attachments reliably
+- stores source-to-destination mappings
+- produces reconciliation output
+- supports clear pilot ownership rules
+- is simple enough to evolve safely

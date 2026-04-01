@@ -1,0 +1,30 @@
+---
+description: Architecture rules for the migration engine and coexistence layer.
+alwaysApply: true
+---
+
+# Migration Architecture Rules
+
+## Required Components
+The project should be organized around these logical components:
+- Zendesk connector
+- transformation layer
+- BoldDesk connector
+- mapping persistence layer
+- migration orchestration layer
+- reconciliation layer
+- retry/error handling layer
+
+## Architectural Constraints
+- prefer a modular monolith first
+- prefer TypeScript / Node.js
+- prefer PostgreSQL for mappings, jobs, and audit logs
+- use CLI-first administration
+- add queues only when needed
+
+## Required Data Concerns
+- preserve source IDs
+- preserve chronology of replies and internal notes
+- explicitly distinguish public vs internal content
+- handle attachments as first-class migration entities
+- design for idempotency and resumability
