@@ -100,10 +100,10 @@ export class ZendeskClient {
     return params;
   }
 
-  private parseRetryAfter(headers?: Record<string, string>): number {
+  private parseRetryAfter(headers?: Record<string, unknown>): number {
     const value = headers?.["retry-after"];
-    if (value) {
-      const seconds = parseInt(value, 10);
+    if (typeof value === "string" || typeof value === "number") {
+      const seconds = parseInt(String(value), 10);
       if (!isNaN(seconds)) return seconds * 1000;
     }
     return DEFAULT_RETRY_DELAY_MS;
