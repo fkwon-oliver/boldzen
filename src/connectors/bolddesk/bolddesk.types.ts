@@ -104,7 +104,8 @@ export interface BoldDeskTicket {
 // ---------------------------------------------------------------------------
 
 /**
- * Public reply: POST /api/v1/{ticketId}/updates
+ * Public reply: POST /api/v1/tickets/{ticketId}/updates
+ * `attachments` is a comma-separated string of upload tokens (not an array).
  */
 export interface BoldDeskCreateReplyRequest {
   description: string;
@@ -112,17 +113,19 @@ export interface BoldDeskCreateReplyRequest {
   ticketStatusId?: number;
   skipEmailNotification?: boolean;
   dontAppendOnBehalfOfRequesterMessage?: boolean;
-  attachments?: string[];
+  updateDetailsFromPortal?: boolean;
+  attachments?: string;
 }
 
 /**
  * Internal / public note: POST /api/v1/tickets/{ticketId}/notes?isPublicNote={bool}
+ * `attachments` is a comma-separated string of upload tokens (not an array).
  */
 export interface BoldDeskCreateNoteRequest {
   description: string;
   updatedByuserIdorEmailId?: string;
   skipEmailNotification?: boolean;
-  attachments?: string[];
+  attachments?: string;
 }
 
 export interface BoldDeskConversationItem {

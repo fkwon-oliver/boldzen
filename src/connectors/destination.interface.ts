@@ -22,7 +22,7 @@ export interface DestinationConnector {
   createContact(user: NormalizedUser): Promise<CreatedEntity>;
   createOrganization(org: NormalizedOrganization): Promise<CreatedEntity>;
   createTicket(ticket: NormalizedTicket, context: TicketCreationContext): Promise<CreatedEntity>;
-  addComment(ticketDestId: string, comment: NormalizedComment): Promise<CreatedEntity>;
+  addComment(ticketDestId: string, comment: NormalizedComment, attachmentTokens?: string[]): Promise<CreatedEntity>;
 
   uploadAttachment(
     attachment: NormalizedAttachment,

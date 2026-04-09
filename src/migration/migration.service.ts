@@ -319,7 +319,7 @@ export class MigrationService {
 
     for (const comment of commentsToMigrate) {
       try {
-        await this.migrateComment(ticketDestId, comment);
+        await this.migrateComment(ticketDestId, comment, ticketSourceId, job);
       } catch (err) {
         if (job) {
           job.failedItems++;
@@ -369,7 +369,7 @@ export class MigrationService {
       );
     }
 
-    await this.migrateComment(ticketMapping.destinationId, comment);
+    await this.migrateComment(ticketMapping.destinationId, comment, ticketSourceId);
   }
 
   // -------------------------------------------------------------------------
@@ -426,16 +426,34 @@ export class MigrationService {
   private async migrateComment(
     ticketDestId: string,
     comment: NormalizedComment,
+    ticketSourceId: string,
+    job?: MigrationJob,
   ): Promise<void> {
-    const { destination, mappings } = this.deps;
+    const { destination, mappings, logger } = this.deps;
 
     if (await mappings.exists("comment", comment.sourceId)) return;
 
+    const attachmentTokens: string[] = [];
     for (const attachment of comment.attachments) {
-      await this.migrateAttachment(attachment);
+      try {
+        const token = await this.migrateAttachment(attachment);
+        attachmentTokens.push(token);
+      } catch (err) {
+        if (job) {
+          job.failedItems++;
+          await this.recordFailure(
+            job, "attachment", attachment.sourceId, err,
+            { ticketSourceId, commentSourceId: comment.sourceId },
+          );
+        }
+        logger.warn(
+          { attachmentSourceId: attachment.sourceId, ticketSourceId, err },
+          "Attachment upload failed — comment will be created without it",
+        );
+      }
     }
 
-    const created = await destination.addComment(ticketDestId, comment);
+    const created = await destination.addComment(ticketDestId, comment, attachmentTokens);
 
     await mappings.save({
       entityType: "comment",

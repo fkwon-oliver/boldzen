@@ -151,21 +151,25 @@ export class BoldDeskConnector implements DestinationConnector {
   async addComment(
     ticketDestId: string,
     comment: NormalizedComment,
+    attachmentTokens?: string[],
   ): Promise<CreatedEntity> {
     if (comment.isPublic) {
-      return this.addReply(ticketDestId, comment);
+      return this.addReply(ticketDestId, comment, attachmentTokens);
     }
-    return this.addNote(ticketDestId, comment);
+    return this.addNote(ticketDestId, comment, attachmentTokens);
   }
 
   private async addReply(
     ticketDestId: string,
     comment: NormalizedComment,
+    attachmentTokens?: string[],
   ): Promise<CreatedEntity> {
     const body: BoldDeskCreateReplyRequest = {
       description: comment.htmlBody ?? comment.body,
       skipEmailNotification: true,
       dontAppendOnBehalfOfRequesterMessage: true,
+      updateDetailsFromPortal: false,
+      attachments: attachmentTokens?.length ? attachmentTokens.join(",") : undefined,
     };
 
     const result = await this.client.post<BoldDeskConversationItem>(
@@ -179,10 +183,12 @@ export class BoldDeskConnector implements DestinationConnector {
   private async addNote(
     ticketDestId: string,
     comment: NormalizedComment,
+    attachmentTokens?: string[],
   ): Promise<CreatedEntity> {
     const body: BoldDeskCreateNoteRequest = {
       description: comment.htmlBody ?? comment.body,
       skipEmailNotification: true,
+      attachments: attachmentTokens?.length ? attachmentTokens.join(",") : undefined,
     };
 
     const result = await this.client.post<BoldDeskConversationItem>(
@@ -202,7 +208,7 @@ export class BoldDeskConnector implements DestinationConnector {
     fileBuffer: Buffer,
   ): Promise<CreatedEntity> {
     const result = await this.client.postMultipart<BoldDeskAttachmentUploadResult>(
-      "/api/v1/tickets/attachment",
+      "/api/v1/attachments",
       attachment.fileName,
       fileBuffer,
       attachment.contentType,
