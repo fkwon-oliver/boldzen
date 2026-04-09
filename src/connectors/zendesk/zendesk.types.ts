@@ -96,3 +96,11 @@ export interface ZendeskCommentsResponse {
 export interface ZendeskTicketResponse {
   ticket: ZendeskTicket;
 }
+
+export interface ZendeskUserResponse {
+  user: ZendeskUser;
+}
+
+export interface ZendeskOrganizationResponse {
+  organization: ZendeskOrganization;
+}

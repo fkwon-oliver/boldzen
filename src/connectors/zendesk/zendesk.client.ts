@@ -25,11 +25,21 @@ export class ZendeskClient {
   }
 
   async get<T>(path: string, params: Record<string, string | number> = {}): Promise<T> {
+    return this.requestWithRetry<T>(() => this.http.get(path, { params }));
+  }
+
+  async put<T>(path: string, body: unknown): Promise<T> {
+    return this.requestWithRetry<T>(() => this.http.put(path, body));
+  }
+
+  private async requestWithRetry<T>(
+    fn: () => Promise<AxiosResponse<T>>,
+  ): Promise<T> {
     let lastError: unknown;
 
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       try {
-        const response: AxiosResponse<T> = await this.http.get(path, { params });
+        const response = await fn();
         return response.data;
       } catch (err) {
         lastError = err;

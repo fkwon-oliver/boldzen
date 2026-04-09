@@ -17,6 +17,8 @@ import {
   ZendeskTicketsResponse,
   ZendeskCommentsResponse,
   ZendeskTicketResponse,
+  ZendeskUserResponse,
+  ZendeskOrganizationResponse,
 } from "./zendesk.types";
 
 export interface ZendeskConfig {
@@ -25,11 +27,23 @@ export interface ZendeskConfig {
   apiToken: string;
 }
 
+export interface ZendeskTicketUpdate {
+  custom_fields?: Array<{ id: number; value: unknown }>;
+  tags?: string[];
+  additional_tags?: string[];
+  remove_tags?: string[];
+  comment?: { body: string; public: boolean };
+}
+
 export class ZendeskConnector implements SourceConnector {
   private readonly client: ZendeskClient;
 
   constructor(config: ZendeskConfig) {
     this.client = new ZendeskClient(config);
+  }
+
+  async updateTicket(ticketId: string, update: ZendeskTicketUpdate): Promise<void> {
+    await this.client.put(`/tickets/${ticketId}`, { ticket: update });
   }
 
   async fetchUsers(cursor?: string): Promise<PaginatedResult<NormalizedUser>> {
@@ -81,6 +95,18 @@ export class ZendeskConnector implements SourceConnector {
 
     const comments = await this.fetchAllComments(ticketId);
     return normalizeTicket(ticketRes.ticket, comments);
+  }
+
+  async fetchUserById(userId: string): Promise<NormalizedUser> {
+    const res = await this.client.get<ZendeskUserResponse>(`/users/${userId}`);
+    return normalizeUser(res.user);
+  }
+
+  async fetchOrganizationById(orgId: string): Promise<NormalizedOrganization> {
+    const res = await this.client.get<ZendeskOrganizationResponse>(
+      `/organizations/${orgId}`,
+    );
+    return normalizeOrganization(res.organization);
   }
 
   async downloadAttachment(url: string): Promise<Buffer> {

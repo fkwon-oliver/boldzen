@@ -31,3 +31,26 @@ export class MappingNotFoundError extends Error {
     this.name = "MappingNotFoundError";
   }
 }
+
+/**
+ * Classify whether an error is transient (worth retrying at the application level)
+ * vs permanent (data issue, 4xx client error, missing mapping).
+ *
+ * HTTP-level retries (429, 5xx) are already handled inside the clients.
+ * This classifier operates at the entity-migration level.
+ */
+export function isTransientError(err: unknown): boolean {
+  if (err instanceof MappingNotFoundError) return false;
+
+  if (err instanceof ConnectorError) {
+    const status = err.statusCode;
+    if (!status) return true; // network / timeout — transient
+    if (status === 429 || status >= 500) return true;
+    return false; // 4xx (except 429) — permanent
+  }
+
+  if (err instanceof MigrationError) return false;
+
+  // Unknown errors are assumed transient (safe to retry)
+  return true;
+}

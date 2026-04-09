@@ -1,6 +1,6 @@
 import { Pool } from "pg";
 import { JobRepository } from "../job.repository";
-import { MigrationJob, FailedItem } from "../../models";
+import { MigrationJob, FailedItem, FailedItemStatus } from "../../models";
 
 export class PgJobRepository implements JobRepository {
   constructor(private readonly pool: Pool) {}
@@ -44,15 +44,53 @@ export class PgJobRepository implements JobRepository {
 
   async addFailedItem(item: FailedItem): Promise<void> {
     await this.pool.query(
-      `INSERT INTO failed_items (job_id, entity_type, source_id, error, retry_count, last_attempt_at)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
-      [item.jobId, item.entityType, item.sourceId, item.error, item.retryCount, item.lastAttemptAt],
+      `INSERT INTO failed_items (job_id, entity_type, source_id, error, retry_count, last_attempt_at, status, metadata)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       ON CONFLICT (job_id, entity_type, source_id)
+       DO UPDATE SET error = EXCLUDED.error,
+                     retry_count = EXCLUDED.retry_count,
+                     last_attempt_at = EXCLUDED.last_attempt_at,
+                     status = EXCLUDED.status,
+                     metadata = EXCLUDED.metadata`,
+      [
+        item.jobId,
+        item.entityType,
+        item.sourceId,
+        item.error,
+        item.retryCount,
+        item.lastAttemptAt,
+        item.status ?? "pending",
+        JSON.stringify(item.metadata ?? {}),
+      ],
+    );
+  }
+
+  async updateFailedItem(item: FailedItem): Promise<void> {
+    await this.pool.query(
+      `UPDATE failed_items
+       SET error = $2, retry_count = $3, last_attempt_at = $4, status = $5, metadata = $6
+       WHERE id = $1`,
+      [
+        item.id,
+        item.error,
+        item.retryCount,
+        item.lastAttemptAt,
+        item.status ?? "pending",
+        JSON.stringify(item.metadata ?? {}),
+      ],
+    );
+  }
+
+  async updateFailedItemStatus(id: number, status: FailedItemStatus): Promise<void> {
+    await this.pool.query(
+      `UPDATE failed_items SET status = $2 WHERE id = $1`,
+      [id, status],
     );
   }
 
   async getFailedItems(jobId: number): Promise<FailedItem[]> {
     const result = await this.pool.query(
-      `SELECT * FROM failed_items WHERE job_id = $1`,
+      `SELECT * FROM failed_items WHERE job_id = $1 ORDER BY id`,
       [jobId],
     );
     return result.rows.map(this.toFailedItem);
@@ -60,8 +98,21 @@ export class PgJobRepository implements JobRepository {
 
   async getRetryableItems(jobId: number, maxRetries: number): Promise<FailedItem[]> {
     const result = await this.pool.query(
-      `SELECT * FROM failed_items WHERE job_id = $1 AND retry_count < $2`,
+      `SELECT * FROM failed_items
+       WHERE job_id = $1 AND status = 'pending' AND retry_count < $2
+       ORDER BY id`,
       [jobId, maxRetries],
+    );
+    return result.rows.map(this.toFailedItem);
+  }
+
+  async getFailedItemsForTicket(ticketSourceId: string): Promise<FailedItem[]> {
+    const result = await this.pool.query(
+      `SELECT * FROM failed_items
+       WHERE (entity_type = 'ticket' AND source_id = $1)
+          OR (metadata->>'ticketSourceId' = $1)
+       ORDER BY id`,
+      [ticketSourceId],
     );
     return result.rows.map(this.toFailedItem);
   }
@@ -89,6 +140,8 @@ export class PgJobRepository implements JobRepository {
       error: row.error as string,
       retryCount: row.retry_count as number,
       lastAttemptAt: (row.last_attempt_at as Date).toISOString(),
+      status: (row.status as FailedItemStatus) ?? "pending",
+      metadata: (row.metadata as Record<string, unknown>) ?? {},
     };
   }
 }

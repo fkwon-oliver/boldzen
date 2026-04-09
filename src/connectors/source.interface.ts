@@ -15,6 +15,8 @@ export interface SourceConnector {
   fetchOrganizations(cursor?: string): Promise<PaginatedResult<NormalizedOrganization>>;
   fetchTickets(cursor?: string): Promise<PaginatedResult<NormalizedTicket>>;
   fetchTicketById(ticketId: string): Promise<NormalizedTicket>;
+  fetchUserById(userId: string): Promise<NormalizedUser>;
+  fetchOrganizationById(orgId: string): Promise<NormalizedOrganization>;
 
   downloadAttachment(url: string): Promise<Buffer>;
 }
