@@ -9,7 +9,13 @@ import { PgJobRepository } from "../persistence/pg/pg.job.repository";
 import { PgAuditRepository } from "../persistence/pg/pg.audit.repository";
 import { ZendeskConnector } from "../connectors/zendesk/zendesk.connector";
 import { BoldDeskConnector } from "../connectors/bolddesk/bolddesk.connector";
+import * as path from "path";
 import { MigrationService } from "../migration/migration.service";
+import { AgentResolver } from "../transform/agent.resolver";
+import { GroupResolver } from "../transform/group.resolver";
+import { loadAgentMappingsFromCSV } from "../transform/agent-csv.loader";
+import { buildTopicTagToValueMap } from "../transform/topic.resolver";
+import { buildTaggerTagSet } from "../transform/tag.normalizer";
 import { ReconciliationService } from "../reconciliation/reconciliation.service";
 import { RetryService } from "../retry/retry.service";
 import { PilotOwnershipService } from "../pilot/pilot.service";
@@ -17,14 +23,59 @@ import { PilotOwnershipService } from "../pilot/pilot.service";
 function buildServices(config: ReturnType<typeof loadConfig>) {
   const logger = createLogger(config.logLevel);
   const pool = getPool(config.database.url);
+  const topicsCsvPath = path.resolve(__dirname, "../../", config.migration.topicsCsvPath);
+  const orgsCsvPath = path.resolve(__dirname, "../../", config.migration.orgsCsvPath);
+  const topicTagToValueMap = buildTopicTagToValueMap(topicsCsvPath);
+  const taggerTags = buildTaggerTagSet(topicsCsvPath, orgsCsvPath);
+
+  logger.info(
+    { topicMappings: topicTagToValueMap.size, taggerTags: taggerTags.size },
+    "Topic and tagger tag data loaded",
+  );
+
+  if (!config.migration.bolddeskTopicFieldKey) {
+    logger.warn(
+      "BOLDDESK_TOPIC_FIELD_KEY is not set — Topic custom field will NOT be populated on migrated tickets. " +
+      "Set this in .env to map Zendesk topics to BoldDesk.",
+    );
+  }
+
+  if (!config.migration.bolddeskZdIdFieldKey) {
+    logger.warn(
+      "BOLDDESK_ZD_ID_FIELD_KEY is not set — Zendesk source ticket ID will NOT be stored as a BoldDesk custom field. " +
+      "Set this in .env for UI-visible cross-reference.",
+    );
+  }
+
   const source = new ZendeskConnector(config.zendesk);
-  const destination = new BoldDeskConnector(config.bolddesk);
+  const destination = new BoldDeskConnector({
+    ...config.bolddesk,
+    topicFieldKey: config.migration.bolddeskTopicFieldKey || undefined,
+    topicTagToValueMap,
+    taggerTags,
+    zdIdFieldKey: config.migration.bolddeskZdIdFieldKey || undefined,
+    logger,
+  });
   const mappings = new PgMappingRepository(pool);
   const jobs = new PgJobRepository(pool);
   const audit = new PgAuditRepository(pool);
 
+  const agentsCsvPath = path.resolve(__dirname, "../../data/agents.csv");
+  const { mappings: agentMappings, agentGroupMap } = loadAgentMappingsFromCSV(agentsCsvPath, logger);
+  const agentResolver = agentMappings.length > 0
+    ? new AgentResolver(agentMappings, logger)
+    : undefined;
+
+  const BOLDDESK_GROUP_MAPPINGS = [
+    { groupName: "Student Experience Center", groupId: 3 },
+    { groupName: "Content Team", groupId: 4 },
+  ];
+
+  const groupResolver = new GroupResolver(BOLDDESK_GROUP_MAPPINGS, logger);
+  groupResolver.setAgentGroupMap(agentGroupMap);
+
   const migration = new MigrationService({
-    source, destination, mappings, jobs, audit, logger,
+    source, destination, mappings, jobs, audit, logger, agentResolver, groupResolver,
   });
 
   const retry = new RetryService({

@@ -16,13 +16,27 @@ export interface TicketCreationContext {
   requesterName: string;
   contactGroupDestId?: string;
   assigneeEmail?: string;
+  assigneeAgentId?: number;
+  groupId?: number;
+  attachmentTokens?: string[];
+}
+
+/** Resolved author identity for provenance on migrated comments. */
+export interface CommentContext {
+  authorEmail?: string;
+  authorName?: string;
 }
 
 export interface DestinationConnector {
   createContact(user: NormalizedUser): Promise<CreatedEntity>;
   createOrganization(org: NormalizedOrganization): Promise<CreatedEntity>;
   createTicket(ticket: NormalizedTicket, context: TicketCreationContext): Promise<CreatedEntity>;
-  addComment(ticketDestId: string, comment: NormalizedComment, attachmentTokens?: string[]): Promise<CreatedEntity>;
+  addComment(
+    ticketDestId: string,
+    comment: NormalizedComment,
+    attachmentTokens?: string[],
+    commentContext?: CommentContext,
+  ): Promise<CreatedEntity>;
 
   uploadAttachment(
     attachment: NormalizedAttachment,

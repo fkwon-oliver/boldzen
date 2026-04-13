@@ -25,12 +25,17 @@ export function loadConfig() {
       baseUrl: required("BOLDDESK_BASE_URL"),
       apiKey: required("BOLDDESK_API_KEY"),
       defaultBrandId: parseInt(optional("BOLDDESK_BRAND_ID", "1"), 10),
+      ticketPortalValue: required("BOLDDESK_TICKET_PORTAL_VALUE"),
     },
     database: {
       url: required("DATABASE_URL"),
     },
     migration: {
       batchSize: parseInt(optional("MIGRATION_BATCH_SIZE", "50"), 10),
+      topicsCsvPath: optional("TOPICS_CSV_PATH", "data/topics.csv"),
+      orgsCsvPath: optional("ORGS_CSV_PATH", "data/organizations.csv"),
+      bolddeskTopicFieldKey: optional("BOLDDESK_TOPIC_FIELD_KEY", ""),
+      bolddeskZdIdFieldKey: optional("BOLDDESK_ZD_ID_FIELD_KEY", ""),
     },
     retry: {
       maxRetries: parseInt(optional("RETRY_MAX_ATTEMPTS", "3"), 10),

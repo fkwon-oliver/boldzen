@@ -2,6 +2,7 @@ import {
   DestinationConnector,
   CreatedEntity,
   TicketCreationContext,
+  CommentContext,
 } from "../destination.interface";
 import {
   NormalizedTicket,
@@ -14,6 +15,11 @@ import { BoldDeskClient } from "./bolddesk.client";
 import { mapTicketStatus } from "../../transform/status.mapper";
 import { mapTicketPriority } from "../../transform/priority.mapper";
 import { normalizeTags } from "../../transform/tag.normalizer";
+import { resolveTopicValue } from "../../transform/topic.resolver";
+import {
+  buildTicketProvenanceBlock,
+  buildCommentProvenanceHeader,
+} from "../../transform/provenance";
 import {
   BoldDeskContact,
   BoldDeskContactGroup,
@@ -28,20 +34,39 @@ import {
   BOLDDESK_STATUS_IDS,
   BOLDDESK_PRIORITY_IDS,
 } from "./bolddesk.types";
+import { Logger } from "../../logger";
 
 export interface BoldDeskConfig {
   baseUrl: string;
   apiKey: string;
   defaultBrandId: number;
+  ticketPortalValue: string;
+  topicFieldKey?: string;
+  topicTagToValueMap?: Map<string, string>;
+  taggerTags?: Set<string>;
+  zdIdFieldKey?: string;
+  logger?: Logger;
 }
 
 export class BoldDeskConnector implements DestinationConnector {
   private readonly client: BoldDeskClient;
   private readonly brandId: number;
+  private readonly ticketPortalValue: string;
+  private readonly topicFieldKey: string | undefined;
+  private readonly topicTagToValueMap: Map<string, string>;
+  private readonly taggerTags: Set<string>;
+  private readonly zdIdFieldKey: string | undefined;
+  private readonly logger: Logger | undefined;
 
   constructor(config: BoldDeskConfig) {
     this.client = new BoldDeskClient(config);
     this.brandId = config.defaultBrandId;
+    this.ticketPortalValue = config.ticketPortalValue;
+    this.topicFieldKey = config.topicFieldKey || undefined;
+    this.topicTagToValueMap = config.topicTagToValueMap ?? new Map();
+    this.taggerTags = config.taggerTags ?? new Set();
+    this.zdIdFieldKey = config.zdIdFieldKey || undefined;
+    this.logger = config.logger;
   }
 
   // -----------------------------------------------------------------------
@@ -118,21 +143,61 @@ export class BoldDeskConnector implements DestinationConnector {
       ? mapTicketPriority(ticket.priority)
       : undefined;
 
+    const customFields: Record<string, unknown> = {};
+    const topicValue = resolveTopicValue(ticket.customFields, this.topicTagToValueMap);
+    if (topicValue && this.topicFieldKey) {
+      customFields[this.topicFieldKey] = topicValue;
+    }
+
+    if (this.zdIdFieldKey) {
+      customFields[this.zdIdFieldKey] = ticket.sourceId;
+    }
+
+    const provenanceBlock = buildTicketProvenanceBlock({
+      zendeskTicketId: ticket.sourceId,
+      createdAt: ticket.createdAt,
+      updatedAt: ticket.updatedAt,
+    });
+    const description = provenanceBlock + (ticket.htmlDescription ?? ticket.description);
+
+    const statusId = BOLDDESK_STATUS_IDS[statusKey] ?? BOLDDESK_STATUS_IDS.new;
+    const priorityId = priorityKey
+      ? BOLDDESK_PRIORITY_IDS[priorityKey] ?? BOLDDESK_PRIORITY_IDS.medium
+      : BOLDDESK_PRIORITY_IDS.medium;
+
+    this.logger?.debug(
+      { ticketSourceId: ticket.sourceId, statusKey, statusId, priorityId },
+      "Mapped status/priority IDs — validate these match your BoldDesk instance",
+    );
+
+    const attachmentTokens = context.attachmentTokens;
+    if (attachmentTokens && attachmentTokens.length > 1) {
+      this.logger?.debug(
+        { ticketSourceId: ticket.sourceId, tokenCount: attachmentTokens.length },
+        "Multi-attachment ticket: tokens will be joined as comma-separated string — verify BoldDesk accepts this format",
+      );
+    }
+
     const body: BoldDeskCreateTicketRequest = {
       brandId: this.brandId,
       subject: ticket.subject,
-      description: ticket.htmlDescription ?? ticket.description,
+      description,
       requesterEmailId: context.requesterEmail,
       requesterName: context.requesterName,
-      priorityId: priorityKey
-        ? BOLDDESK_PRIORITY_IDS[priorityKey] ?? BOLDDESK_PRIORITY_IDS.medium
-        : BOLDDESK_PRIORITY_IDS.medium,
-      statusId: BOLDDESK_STATUS_IDS[statusKey] ?? BOLDDESK_STATUS_IDS.new,
-      tags: normalizeTags(ticket.tags),
+      priorityId,
+      statusId,
+      tags: normalizeTags(ticket.tags, this.taggerTags),
       isVisibleInCustomerPortal: true,
       skipDependencyValidation: true,
+      ticketPortalValue: this.ticketPortalValue,
       contactGroupId: context.contactGroupDestId
         ? parseInt(context.contactGroupDestId, 10)
+        : undefined,
+      agentId: context.assigneeAgentId,
+      groupId: context.groupId,
+      customFields: Object.keys(customFields).length > 0 ? customFields : undefined,
+      attachments: attachmentTokens?.length
+        ? attachmentTokens.join(",")
         : undefined,
     };
 
@@ -152,23 +217,43 @@ export class BoldDeskConnector implements DestinationConnector {
     ticketDestId: string,
     comment: NormalizedComment,
     attachmentTokens?: string[],
+    commentContext?: CommentContext,
   ): Promise<CreatedEntity> {
     if (comment.isPublic) {
-      return this.addReply(ticketDestId, comment, attachmentTokens);
+      return this.addReply(ticketDestId, comment, attachmentTokens, commentContext);
     }
-    return this.addNote(ticketDestId, comment, attachmentTokens);
+    return this.addNote(ticketDestId, comment, attachmentTokens, commentContext);
   }
 
   private async addReply(
     ticketDestId: string,
     comment: NormalizedComment,
     attachmentTokens?: string[],
+    commentContext?: CommentContext,
   ): Promise<CreatedEntity> {
+    const provenanceHeader = buildCommentProvenanceHeader({
+      authorName: commentContext?.authorName,
+      authorEmail: commentContext?.authorEmail,
+      authorSourceId: comment.authorSourceId,
+      createdAt: comment.createdAt,
+      isPublic: true,
+    });
+    const description = provenanceHeader + (comment.htmlBody ?? comment.body);
+
+    if (attachmentTokens && attachmentTokens.length > 1) {
+      this.logger?.debug(
+        { ticketDestId, commentSourceId: comment.sourceId, tokenCount: attachmentTokens.length },
+        "Multi-attachment reply: tokens joined as comma-separated string",
+      );
+    }
+
     const body: BoldDeskCreateReplyRequest = {
-      description: comment.htmlBody ?? comment.body,
+      description,
       skipEmailNotification: true,
       dontAppendOnBehalfOfRequesterMessage: true,
       updateDetailsFromPortal: false,
+      // Best-effort: BoldDesk may honour this for agent emails only
+      updatedByuserIdorEmailId: commentContext?.authorEmail,
       attachments: attachmentTokens?.length ? attachmentTokens.join(",") : undefined,
     };
 
@@ -184,10 +269,28 @@ export class BoldDeskConnector implements DestinationConnector {
     ticketDestId: string,
     comment: NormalizedComment,
     attachmentTokens?: string[],
+    commentContext?: CommentContext,
   ): Promise<CreatedEntity> {
+    const provenanceHeader = buildCommentProvenanceHeader({
+      authorName: commentContext?.authorName,
+      authorEmail: commentContext?.authorEmail,
+      authorSourceId: comment.authorSourceId,
+      createdAt: comment.createdAt,
+      isPublic: false,
+    });
+    const description = provenanceHeader + (comment.htmlBody ?? comment.body);
+
+    if (attachmentTokens && attachmentTokens.length > 1) {
+      this.logger?.debug(
+        { ticketDestId, commentSourceId: comment.sourceId, tokenCount: attachmentTokens.length },
+        "Multi-attachment note: tokens joined as comma-separated string",
+      );
+    }
+
     const body: BoldDeskCreateNoteRequest = {
-      description: comment.htmlBody ?? comment.body,
+      description,
       skipEmailNotification: true,
+      updatedByuserIdorEmailId: commentContext?.authorEmail,
       attachments: attachmentTokens?.length ? attachmentTokens.join(",") : undefined,
     };
 

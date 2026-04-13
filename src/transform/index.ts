@@ -2,3 +2,8 @@ export * from "./status.mapper";
 export * from "./priority.mapper";
 export * from "./comment.transformer";
 export * from "./tag.normalizer";
+export * from "./agent.resolver";
+export * from "./agent-csv.loader";
+export * from "./group.resolver";
+export * from "./topic.resolver";
+export * from "./provenance";

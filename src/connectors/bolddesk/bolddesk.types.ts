@@ -73,11 +73,13 @@ export interface BoldDeskCreateTicketRequest {
   requesterId?: number | null;
   contactGroupId?: number;
   agentId?: number;
+  groupId?: number;
   tags?: string[];
   isVisibleInCustomerPortal: boolean;
   skipDependencyValidation?: boolean;
-  // attachment tokens returned from the upload endpoint
-  attachments?: string[];
+  ticketPortalValue: string;
+  /** Comma-separated attachment upload tokens (not an array). */
+  attachments?: string;
   customFields?: Record<string, unknown>;
 }
 
@@ -150,6 +152,13 @@ export interface BoldDeskAttachmentUploadResult {
 // ---------------------------------------------------------------------------
 // Status / Priority ID mappings
 // BoldDesk uses numeric IDs. These defaults should be confirmed per-instance.
+//
+// MANUAL VALIDATION REQUIRED before bulk migration:
+//   1. GET /api/v1.0/ticket_statuses — verify IDs match below
+//   2. GET /api/v1.0/ticket_priorities — verify IDs match below
+//   3. If your instance uses custom statuses, add them here.
+//   4. The connector logs statusId/priorityId at debug level per ticket;
+//      run a single-ticket migration with LOG_LEVEL=debug to verify.
 // ---------------------------------------------------------------------------
 
 export const BOLDDESK_STATUS_IDS: Record<string, number> = {

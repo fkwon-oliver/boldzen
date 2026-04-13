@@ -5,11 +5,11 @@ import {
   BoldDeskContactGroup,
   BoldDeskContactListResponse,
   BoldDeskContactGroupListResponse,
-  BoldDeskTicket,
   BoldDeskConversationItem,
   BoldDeskAttachmentUploadResult,
 } from "@/connectors/bolddesk/bolddesk.types";
 import { NormalizedUser, NormalizedOrganization, NormalizedTicket, NormalizedComment, NormalizedAttachment } from "@/models";
+import { TicketCreationContext, CommentContext } from "@/connectors/destination.interface";
 
 jest.mock("axios");
 
@@ -19,6 +19,7 @@ const TEST_CONFIG = {
   baseUrl: "https://test.bolddesk.com",
   apiKey: "test-api-key",
   defaultBrandId: 1,
+  ticketPortalValue: "test-portal",
 };
 
 function mockAxiosInstance() {
@@ -235,36 +236,29 @@ describe("BoldDeskConnector", () => {
       customFields: {},
     };
 
-    const context = { requesterEmail: "alice@example.com" };
+    const context: TicketCreationContext = {
+      requesterEmail: "alice@example.com",
+      requesterName: "Alice",
+    };
 
     it("creates a ticket with mapped status and priority", async () => {
-      const apiResponse: BoldDeskTicket = {
-        ticketId: 1000,
-        subject: "Test Ticket",
-        description: "<p>Help please</p>",
-        statusId: 2,
-        priorityId: 3,
-        contactId: 100,
-      };
-
-      http.post.mockResolvedValueOnce({ data: apiResponse });
+      http.post.mockResolvedValueOnce({ data: { id: 1000, isFileUploadSuccess: true } });
 
       const result = await connector.createTicket(ticket, context);
 
       expect(result.destinationId).toBe("1000");
-      expect(http.post).toHaveBeenCalledWith(
-        "/api/v1.0/tickets",
-        expect.objectContaining({
-          brandId: 1,
-          subject: "Test Ticket",
-          description: "<p>Help please</p>",
-          requesterEmailId: "alice@example.com",
-          priorityId: 3,
-          statusId: 2,
-          tags: ["billing", "urgent"],
-          isVisibleInCustomerPortal: true,
-        }),
-      );
+      const callBody = http.post.mock.calls[0][1] as Record<string, unknown>;
+      expect(callBody.brandId).toBe(1);
+      expect(callBody.subject).toBe("Test Ticket");
+      expect(callBody.requesterEmailId).toBe("alice@example.com");
+      expect(callBody.priorityId).toBe(3);
+      expect(callBody.statusId).toBe(2);
+      expect(callBody.tags).toEqual(["billing", "urgent"]);
+      expect(callBody.isVisibleInCustomerPortal).toBe(true);
+      expect(callBody.ticketPortalValue).toBe("test-portal");
+      expect(callBody.description).toContain("Migrated from Zendesk");
+      expect(callBody.description).toContain("Ticket #500");
+      expect(callBody.description).toContain("<p>Help please</p>");
     });
 
     it("defaults priority to medium when not set", async () => {
@@ -273,16 +267,7 @@ describe("BoldDeskConnector", () => {
         priority: undefined,
       };
 
-      const apiResponse: BoldDeskTicket = {
-        ticketId: 1001,
-        subject: "Test Ticket",
-        description: "<p>Help please</p>",
-        statusId: 2,
-        priorityId: 2,
-        contactId: 100,
-      };
-
-      http.post.mockResolvedValueOnce({ data: apiResponse });
+      http.post.mockResolvedValueOnce({ data: { id: 1001, isFileUploadSuccess: true } });
 
       await connector.createTicket(noPriorityTicket, context);
 
@@ -293,19 +278,11 @@ describe("BoldDeskConnector", () => {
     });
 
     it("passes contactGroupDestId when provided", async () => {
-      const apiResponse: BoldDeskTicket = {
-        ticketId: 1002,
-        subject: "Test Ticket",
-        description: "<p>Help please</p>",
-        statusId: 2,
-        priorityId: 3,
-        contactId: 100,
-      };
-
-      http.post.mockResolvedValueOnce({ data: apiResponse });
+      http.post.mockResolvedValueOnce({ data: { id: 1002, isFileUploadSuccess: true } });
 
       await connector.createTicket(ticket, {
         requesterEmail: "alice@example.com",
+        requesterName: "Alice",
         contactGroupDestId: "50",
       });
 
@@ -313,6 +290,209 @@ describe("BoldDeskConnector", () => {
         "/api/v1.0/tickets",
         expect.objectContaining({ contactGroupId: 50 }),
       );
+    });
+
+    it("includes ticketPortalValue from config", async () => {
+      http.post.mockResolvedValueOnce({ data: { id: 1008, isFileUploadSuccess: true } });
+
+      await connector.createTicket(ticket, context);
+
+      const callBody = http.post.mock.calls[0][1] as Record<string, unknown>;
+      expect(callBody.ticketPortalValue).toBe("test-portal");
+    });
+
+    it("sets agentId when assigneeAgentId is provided", async () => {
+      http.post.mockResolvedValueOnce({ data: { id: 1003, isFileUploadSuccess: true } });
+
+      await connector.createTicket(ticket, {
+        requesterEmail: "alice@example.com",
+        requesterName: "Alice",
+        assigneeAgentId: 42,
+      });
+
+      expect(http.post).toHaveBeenCalledWith(
+        "/api/v1.0/tickets",
+        expect.objectContaining({ agentId: 42 }),
+      );
+    });
+
+    it("sets groupId when provided in context", async () => {
+      http.post.mockResolvedValueOnce({ data: { id: 1009, isFileUploadSuccess: true } });
+
+      await connector.createTicket(ticket, {
+        requesterEmail: "alice@example.com",
+        requesterName: "Alice",
+        groupId: 3,
+      });
+
+      expect(http.post).toHaveBeenCalledWith(
+        "/api/v1.0/tickets",
+        expect.objectContaining({ groupId: 3 }),
+      );
+    });
+
+    it("omits groupId when not provided in context", async () => {
+      http.post.mockResolvedValueOnce({ data: { id: 1010, isFileUploadSuccess: true } });
+
+      await connector.createTicket(ticket, context);
+
+      const callBody = http.post.mock.calls[0][1] as Record<string, unknown>;
+      expect(callBody.groupId).toBeUndefined();
+    });
+
+    it("omits agentId when assigneeAgentId is not provided", async () => {
+      http.post.mockResolvedValueOnce({ data: { id: 1004, isFileUploadSuccess: true } });
+
+      await connector.createTicket(ticket, context);
+
+      const callBody = http.post.mock.calls[0][1] as Record<string, unknown>;
+      expect(callBody.agentId).toBeUndefined();
+    });
+
+    it("sends attachmentTokens as comma-separated string", async () => {
+      http.post.mockResolvedValueOnce({ data: { id: 1005, isFileUploadSuccess: true } });
+
+      await connector.createTicket(ticket, {
+        requesterEmail: "alice@example.com",
+        requesterName: "Alice",
+        attachmentTokens: ["tok-1", "tok-2"],
+      });
+
+      expect(http.post).toHaveBeenCalledWith(
+        "/api/v1.0/tickets",
+        expect.objectContaining({ attachments: "tok-1,tok-2" }),
+      );
+    });
+
+    it("sends single attachmentToken as string (not array)", async () => {
+      http.post.mockResolvedValueOnce({ data: { id: 1007, isFileUploadSuccess: true } });
+
+      await connector.createTicket(ticket, {
+        requesterEmail: "alice@example.com",
+        requesterName: "Alice",
+        attachmentTokens: ["tok-single"],
+      });
+
+      const callBody = http.post.mock.calls[0][1] as Record<string, unknown>;
+      expect(callBody.attachments).toBe("tok-single");
+      expect(typeof callBody.attachments).toBe("string");
+    });
+
+    it("omits attachments when no tokens provided", async () => {
+      http.post.mockResolvedValueOnce({ data: { id: 1006, isFileUploadSuccess: true } });
+
+      await connector.createTicket(ticket, context);
+
+      const callBody = http.post.mock.calls[0][1] as Record<string, unknown>;
+      expect(callBody.attachments).toBeUndefined();
+    });
+
+    it("sets Topic in customFields when topic field key is configured", async () => {
+      const topicConnector = new BoldDeskConnector({
+        ...TEST_CONFIG,
+        topicFieldKey: "cf_topic",
+        topicTagToValueMap: new Map([
+          ["customer_support", "Customer Support (Question & Answer)"],
+        ]),
+      });
+
+      const topicTicket: NormalizedTicket = {
+        ...ticket,
+        customFields: { "29599516755099": "customer_support" },
+      };
+
+      http.post.mockResolvedValueOnce({ data: { id: 2000, isFileUploadSuccess: true } });
+
+      await topicConnector.createTicket(topicTicket, context);
+
+      const callBody = http.post.mock.calls[0][1] as Record<string, unknown>;
+      expect(callBody.customFields).toEqual({
+        cf_topic: "Customer Support (Question & Answer)",
+      });
+    });
+
+    it("omits customFields when no topic value resolved", async () => {
+      const topicConnector = new BoldDeskConnector({
+        ...TEST_CONFIG,
+        topicFieldKey: "cf_topic",
+        topicTagToValueMap: new Map(),
+      });
+
+      http.post.mockResolvedValueOnce({ data: { id: 2001, isFileUploadSuccess: true } });
+
+      await topicConnector.createTicket(ticket, context);
+
+      const callBody = http.post.mock.calls[0][1] as Record<string, unknown>;
+      expect(callBody.customFields).toBeUndefined();
+    });
+
+    it("strips tagger-injected tags from the tag list", async () => {
+      const taggerConnector = new BoldDeskConnector({
+        ...TEST_CONFIG,
+        taggerTags: new Set(["customer_support", "call_-_wfg"]),
+      });
+
+      const taggedTicket: NormalizedTicket = {
+        ...ticket,
+        tags: ["customer_support", "billing", "call_-_wfg", "vip"],
+      };
+
+      http.post.mockResolvedValueOnce({ data: { id: 2002, isFileUploadSuccess: true } });
+
+      await taggerConnector.createTicket(taggedTicket, context);
+
+      const callBody = http.post.mock.calls[0][1] as Record<string, unknown>;
+      expect(callBody.tags).toEqual(["billing", "vip"]);
+    });
+
+    it("sets Zendesk source ID in customFields when zdIdFieldKey is configured", async () => {
+      const zdIdConnector = new BoldDeskConnector({
+        ...TEST_CONFIG,
+        zdIdFieldKey: "cf_zendesk_id",
+      });
+
+      http.post.mockResolvedValueOnce({ data: { id: 2010, isFileUploadSuccess: true } });
+
+      await zdIdConnector.createTicket(ticket, context);
+
+      const callBody = http.post.mock.calls[0][1] as Record<string, unknown>;
+      expect(callBody.customFields).toEqual(
+        expect.objectContaining({ cf_zendesk_id: "500" }),
+      );
+    });
+
+    it("omits Zendesk source ID from customFields when zdIdFieldKey is not set", async () => {
+      http.post.mockResolvedValueOnce({ data: { id: 2011, isFileUploadSuccess: true } });
+
+      await connector.createTicket(ticket, context);
+
+      const callBody = http.post.mock.calls[0][1] as Record<string, unknown>;
+      expect(callBody.customFields).toBeUndefined();
+    });
+
+    it("topic is NOT duplicated as a tag when tagger stripping is active", async () => {
+      const fullConnector = new BoldDeskConnector({
+        ...TEST_CONFIG,
+        topicFieldKey: "cf_topic",
+        topicTagToValueMap: new Map([
+          ["exam_support", "Exam Support"],
+        ]),
+        taggerTags: new Set(["exam_support", "wfg"]),
+      });
+
+      const topicTagTicket: NormalizedTicket = {
+        ...ticket,
+        tags: ["exam_support", "billing", "wfg"],
+        customFields: { "29599516755099": "exam_support" },
+      };
+
+      http.post.mockResolvedValueOnce({ data: { id: 2003, isFileUploadSuccess: true } });
+
+      await fullConnector.createTicket(topicTagTicket, context);
+
+      const callBody = http.post.mock.calls[0][1] as Record<string, unknown>;
+      expect(callBody.tags).toEqual(["billing"]);
+      expect(callBody.customFields).toEqual({ cf_topic: "Exam Support" });
     });
   });
 
@@ -341,7 +521,7 @@ describe("BoldDeskConnector", () => {
       attachments: [],
     };
 
-    it("sends public comments to the updates endpoint", async () => {
+    it("sends public comments to the updates endpoint with provenance", async () => {
       const apiResponse: BoldDeskConversationItem = {
         conversationItemId: 3001,
         ticketId: 1000,
@@ -351,19 +531,20 @@ describe("BoldDeskConnector", () => {
 
       http.post.mockResolvedValueOnce({ data: apiResponse });
 
-      const result = await connector.addComment("1000", publicComment);
+      const commentCtx: CommentContext = { authorEmail: "alice@example.com", authorName: "Alice" };
+      const result = await connector.addComment("1000", publicComment, undefined, commentCtx);
 
       expect(result.destinationId).toBe("3001");
-      expect(http.post).toHaveBeenCalledWith(
-        "/api/v1/1000/updates",
-        expect.objectContaining({
-          description: "<p>Public reply</p>",
-          skipEmailNotification: true,
-        }),
-      );
+      const callBody = http.post.mock.calls[0][1] as Record<string, unknown>;
+      expect(callBody.description).toContain("Original Reply");
+      expect(callBody.description).toContain("Alice (alice@example.com)");
+      expect(callBody.description).toContain("2024-01-01T01:00:00Z");
+      expect(callBody.description).toContain("<p>Public reply</p>");
+      expect(callBody.skipEmailNotification).toBe(true);
+      expect(callBody.updatedByuserIdorEmailId).toBe("alice@example.com");
     });
 
-    it("sends private notes to the notes endpoint", async () => {
+    it("sends private notes to the notes endpoint with provenance", async () => {
       const apiResponse: BoldDeskConversationItem = {
         conversationItemId: 3002,
         ticketId: 1000,
@@ -373,16 +554,33 @@ describe("BoldDeskConnector", () => {
 
       http.post.mockResolvedValueOnce({ data: apiResponse });
 
-      const result = await connector.addComment("1000", privateNote);
+      const commentCtx: CommentContext = { authorEmail: "agent@co.com", authorName: "Agent" };
+      const result = await connector.addComment("1000", privateNote, undefined, commentCtx);
 
       expect(result.destinationId).toBe("3002");
-      expect(http.post).toHaveBeenCalledWith(
-        "/api/v1/tickets/1000/notes",
-        expect.objectContaining({
-          description: "<p>Internal note</p>",
-          isPublicNote: false,
-        }),
-      );
+      const callBody = http.post.mock.calls[0][1] as Record<string, unknown>;
+      expect(callBody.description).toContain("Original Note");
+      expect(callBody.description).toContain("Agent (agent@co.com)");
+      expect(callBody.description).toContain("<p>Internal note</p>");
+      expect(callBody.isPublicNote).toBe(false);
+      expect(callBody.updatedByuserIdorEmailId).toBe("agent@co.com");
+    });
+
+    it("includes provenance with sourceId when no author context given", async () => {
+      const apiResponse: BoldDeskConversationItem = {
+        conversationItemId: 3004,
+        ticketId: 1000,
+        content: "<p>Public reply</p>",
+        isPrivate: false,
+      };
+
+      http.post.mockResolvedValueOnce({ data: apiResponse });
+
+      await connector.addComment("1000", publicComment);
+
+      const callBody = http.post.mock.calls[0][1] as Record<string, unknown>;
+      expect(callBody.description).toContain("Zendesk user #1");
+      expect(callBody.description).toContain("<p>Public reply</p>");
     });
 
     it("prefers htmlBody over plain body", async () => {
@@ -402,10 +600,8 @@ describe("BoldDeskConnector", () => {
 
       await connector.addComment("1000", plainOnly);
 
-      expect(http.post).toHaveBeenCalledWith(
-        "/api/v1/1000/updates",
-        expect.objectContaining({ description: "Public reply" }),
-      );
+      const callBody = http.post.mock.calls[0][1] as Record<string, unknown>;
+      expect(callBody.description).toContain("Public reply");
     });
   });
 

@@ -1,0 +1,22 @@
+value,tag,default
+Customer Support (Question & Answer),customer_support,false
+Technical Support (Account updates),technical_support,false
+Exam Support,exam_support,false
+IT Requests,it_request,false
+Refunds,refunds,false
+Reminders,reminders,false
+Nullifications,nullifications,false
+Suspended Students,banned_students,false
+Content,content,false
+"Special Accommodations ",special_accommodations_,false
+Mutual Funds Requests,mutual_funds_results,false
+Voicemails,voicemails,false
+"Payment Receipts ",payment_receipts_,false
+Book Orders,book_orders,false
+Reports,reports,false
+GC - Questions redirected to GC,gc_-_questions_redirected_to_gc,false
+GC - Requests from GC,gc_-_requests_from_gc,false
+"GC - Non-compliant ",gc_-_non-compliant_,false
+TICO - Certificates prior to Jan 2019,tico_-_certificates_prior_to_jan_2019,false
+TICO - Questions redirected to TICO,tico_-_questions_redirected_to_tico,false
+SpeedPass Refund Escalation,speedpass_refund_escalation,false

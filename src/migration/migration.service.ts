@@ -2,6 +2,7 @@ import { SourceConnector } from "../connectors/source.interface";
 import {
   DestinationConnector,
   TicketCreationContext,
+  CommentContext,
 } from "../connectors/destination.interface";
 import { MappingRepository } from "../persistence/mapping.repository";
 import { JobRepository } from "../persistence/job.repository";
@@ -16,6 +17,8 @@ import {
   MappedEntityType,
 } from "../models";
 import { MigrationError, MappingNotFoundError } from "../errors";
+import { AgentResolver } from "../transform/agent.resolver";
+import { GroupResolver } from "../transform/group.resolver";
 import { Logger } from "../logger";
 
 export interface MigrationDependencies {
@@ -25,6 +28,8 @@ export interface MigrationDependencies {
   jobs: JobRepository;
   audit: AuditRepository;
   logger: Logger;
+  agentResolver?: AgentResolver;
+  groupResolver?: GroupResolver;
 }
 
 export class MigrationService {
@@ -289,6 +294,36 @@ export class MigrationService {
       logger.debug({ ticketSourceId }, "Ticket already created, processing comments");
     } else {
       const context = await this.buildTicketContext(ticket);
+
+      // Upload attachments from the first comment (initial description) so they
+      // are included in the ticket creation payload. Later comments are handled
+      // by the migrateComment loop below.
+      const firstComment = ticket.comments[0];
+      if (firstComment?.attachments?.length) {
+        const tokens: string[] = [];
+        for (const attachment of firstComment.attachments) {
+          try {
+            const token = await this.migrateAttachment(attachment);
+            tokens.push(token);
+          } catch (err) {
+            if (job) {
+              job.failedItems++;
+              await this.recordFailure(
+                job, "attachment", attachment.sourceId, err,
+                { ticketSourceId, commentSourceId: firstComment.sourceId },
+              );
+            }
+            logger.warn(
+              { attachmentSourceId: attachment.sourceId, ticketSourceId, err },
+              "First-comment attachment upload failed — ticket will be created without it",
+            );
+          }
+        }
+        if (tokens.length > 0) {
+          context.attachmentTokens = tokens;
+        }
+      }
+
       const created = await destination.createTicket(ticket, context);
       ticketDestId = created.destinationId;
 
@@ -391,8 +426,36 @@ export class MigrationService {
     }
 
     let assigneeEmail: string | undefined;
+    let assigneeAgentId: number | undefined;
     if (ticket.assigneeSourceId) {
-      assigneeEmail = (await this.resolveUser(ticket.assigneeSourceId)).email;
+      const assignee = await this.resolveUser(ticket.assigneeSourceId);
+      assigneeEmail = assignee.email;
+
+      if (this.deps.agentResolver) {
+        assigneeAgentId = await this.deps.agentResolver.resolve(assignee.email);
+        if (assigneeAgentId) {
+          this.deps.logger.info(
+            { ticketSourceId: ticket.sourceId, assigneeEmail: assignee.email, agentId: assigneeAgentId },
+            "Assignee resolved to BoldDesk agent",
+          );
+        }
+      } else {
+        this.deps.logger.warn(
+          { ticketSourceId: ticket.sourceId, assigneeEmail: assignee.email },
+          "No AgentResolver configured — ticket will be created unassigned",
+        );
+      }
+    }
+
+    let groupId: number | undefined;
+    if (assigneeEmail && this.deps.groupResolver) {
+      groupId = this.deps.groupResolver.resolveByAgentEmail(assigneeEmail);
+      if (groupId) {
+        this.deps.logger.info(
+          { ticketSourceId: ticket.sourceId, assigneeEmail, groupId },
+          "Group resolved from assignee",
+        );
+      }
     }
 
     return {
@@ -400,6 +463,8 @@ export class MigrationService {
       requesterName: requester.name,
       contactGroupDestId,
       assigneeEmail,
+      assigneeAgentId,
+      groupId,
     };
   }
 
@@ -453,7 +518,10 @@ export class MigrationService {
       }
     }
 
-    const created = await destination.addComment(ticketDestId, comment, attachmentTokens);
+    const commentContext = await this.resolveCommentContext(comment.authorSourceId);
+    const created = await destination.addComment(
+      ticketDestId, comment, attachmentTokens, commentContext,
+    );
 
     await mappings.save({
       entityType: "comment",
@@ -461,6 +529,19 @@ export class MigrationService {
       destinationId: created.destinationId,
       createdAt: new Date().toISOString(),
     });
+  }
+
+  private async resolveCommentContext(authorSourceId: string): Promise<CommentContext> {
+    try {
+      const author = await this.resolveUser(authorSourceId);
+      return { authorEmail: author.email, authorName: author.name };
+    } catch {
+      this.deps.logger.debug(
+        { authorSourceId },
+        "Could not resolve comment author — provenance will use sourceId",
+      );
+      return {};
+    }
   }
 
   private async migrateAttachment(

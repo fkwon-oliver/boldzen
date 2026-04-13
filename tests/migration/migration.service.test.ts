@@ -1,6 +1,6 @@
 import { MigrationService, MigrationDependencies } from "@/migration/migration.service";
 import { SourceConnector, PaginatedResult } from "@/connectors/source.interface";
-import { DestinationConnector, CreatedEntity, TicketCreationContext } from "@/connectors/destination.interface";
+import { DestinationConnector, CreatedEntity, TicketCreationContext, CommentContext } from "@/connectors/destination.interface";
 import { MappingRepository } from "@/persistence/mapping.repository";
 import { JobRepository } from "@/persistence/job.repository";
 import { AuditRepository } from "@/persistence/audit.repository";
@@ -16,6 +16,8 @@ import {
   MappedEntityType,
 } from "@/models";
 import { AuditEntry } from "@/persistence/audit.repository";
+import { AgentResolver } from "@/transform/agent.resolver";
+import { GroupResolver } from "@/transform/group.resolver";
 
 // ── Factories ──────────────────────────────────────────────
 
@@ -327,10 +329,11 @@ describe("MigrationService", () => {
       const user = makeUser();
       const org = makeOrg();
       const attachment = makeAttachment();
-      const comment = makeComment({ attachments: [attachment] });
+      const firstComment = makeComment({ sourceId: "c0", attachments: [attachment] });
+      const secondComment = makeComment({ sourceId: "c1", createdAt: "2024-01-01T00:10:00Z", attachments: [] });
       const ticket = makeTicket({
         organizationSourceId: "o1",
-        comments: [comment],
+        comments: [firstComment, secondComment],
       });
 
       const source = mockSource();
@@ -363,7 +366,7 @@ describe("MigrationService", () => {
         },
       );
 
-      return { source, dest, mappings, user, org, ticket, comment, attachment };
+      return { source, dest, mappings, user, org, ticket, firstComment, secondComment, attachment };
     }
 
     it("migrates a ticket with comments and attachments", async () => {
@@ -439,8 +442,9 @@ describe("MigrationService", () => {
 
   describe("migrateTicketById", () => {
     it("migrates a single ticket end-to-end", async () => {
-      const comment = makeComment();
-      const ticket = makeTicket({ comments: [comment] });
+      const firstComment = makeComment({ sourceId: "c0" });
+      const secondComment = makeComment({ sourceId: "c1" });
+      const ticket = makeTicket({ comments: [firstComment, secondComment] });
 
       const source = mockSource();
       source.fetchTicketById.mockResolvedValue(ticket);
@@ -461,9 +465,10 @@ describe("MigrationService", () => {
     });
 
     it("creates a bookkeeping job so comment failures are persisted", async () => {
+      const firstComment = makeComment({ sourceId: "c0" });
       const comment1 = makeComment({ sourceId: "c1" });
       const comment2 = makeComment({ sourceId: "c2" });
-      const ticket = makeTicket({ comments: [comment1, comment2] });
+      const ticket = makeTicket({ comments: [firstComment, comment1, comment2] });
 
       const source = mockSource();
       source.fetchTicketById.mockResolvedValue(ticket);
@@ -550,9 +555,10 @@ describe("MigrationService", () => {
     });
 
     it("records comment failure without failing the whole ticket", async () => {
+      const firstComment = makeComment({ sourceId: "c0", createdAt: "2024-01-01T00:00:00Z" });
       const comment1 = makeComment({ sourceId: "c1", createdAt: "2024-01-01T00:01:00Z" });
       const comment2 = makeComment({ sourceId: "c2", createdAt: "2024-01-01T00:02:00Z" });
-      const ticket = makeTicket({ comments: [comment1, comment2] });
+      const ticket = makeTicket({ comments: [firstComment, comment1, comment2] });
 
       const source = mockSource();
       source.fetchUsers.mockResolvedValue(singlePage([makeUser()]));
@@ -602,6 +608,269 @@ describe("MigrationService", () => {
       expect(source.fetchUsers).toHaveBeenCalledTimes(2);
       expect(source.fetchUsers).toHaveBeenCalledWith("page2");
       expect(dest.createContact).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe("assignee agent resolution", () => {
+    it("passes assigneeAgentId to createTicket when AgentResolver is configured", async () => {
+      const agent = makeUser({ sourceId: "agent1", email: "agent@co.com", role: "agent" });
+      const ticket = makeTicket({
+        assigneeSourceId: "agent1",
+        comments: [makeComment()],
+      });
+
+      const source = mockSource();
+      source.fetchUsers.mockResolvedValue(singlePage([makeUser(), agent]));
+      source.fetchTickets.mockResolvedValue(singlePage([ticket]));
+      source.fetchTicketById.mockResolvedValue(ticket);
+
+      const dest = mockDestination();
+      const mappings = mockMappings();
+
+      const agentResolver = new AgentResolver(
+        [{ email: "agent@co.com", agentId: 42 }],
+        mockLogger(),
+      );
+
+      const deps = buildDeps({
+        source, destination: dest, mappings, agentResolver,
+      });
+      const svc = new MigrationService(deps);
+
+      await svc.runHistoricalMigration();
+
+      expect(dest.createTicket).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ assigneeAgentId: 42 }),
+      );
+    });
+
+    it("creates ticket unassigned when agent email is not in resolver", async () => {
+      const agent = makeUser({ sourceId: "agent1", email: "unknown@co.com", role: "agent" });
+      const ticket = makeTicket({
+        assigneeSourceId: "agent1",
+        comments: [makeComment()],
+      });
+
+      const source = mockSource();
+      source.fetchUsers.mockResolvedValue(singlePage([makeUser(), agent]));
+      source.fetchTickets.mockResolvedValue(singlePage([ticket]));
+      source.fetchTicketById.mockResolvedValue(ticket);
+
+      const dest = mockDestination();
+      const mappings = mockMappings();
+
+      const agentResolver = new AgentResolver(
+        [{ email: "other@co.com", agentId: 99 }],
+        mockLogger(),
+      );
+
+      const deps = buildDeps({
+        source, destination: dest, mappings, agentResolver,
+      });
+      const svc = new MigrationService(deps);
+
+      await svc.runHistoricalMigration();
+
+      expect(dest.createTicket).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ assigneeAgentId: undefined }),
+      );
+    });
+  });
+
+  describe("group resolution", () => {
+    it("passes groupId to createTicket when GroupResolver resolves from assignee", async () => {
+      const agent = makeUser({ sourceId: "agent1", email: "agent@co.com", role: "agent" });
+      const ticket = makeTicket({
+        assigneeSourceId: "agent1",
+        comments: [makeComment()],
+      });
+
+      const source = mockSource();
+      source.fetchUsers.mockResolvedValue(singlePage([makeUser(), agent]));
+      source.fetchTickets.mockResolvedValue(singlePage([ticket]));
+      source.fetchTicketById.mockResolvedValue(ticket);
+
+      const dest = mockDestination();
+      const mappings = mockMappings();
+
+      const agentResolver = new AgentResolver(
+        [{ email: "agent@co.com", agentId: 42 }],
+        mockLogger(),
+      );
+
+      const groupResolver = new GroupResolver(
+        [{ groupName: "Student Experience Center", groupId: 3 }],
+        mockLogger(),
+      );
+      groupResolver.setAgentGroupMap(new Map([["agent@co.com", "Student Experience Center"]]));
+
+      const deps = buildDeps({
+        source, destination: dest, mappings, agentResolver, groupResolver,
+      });
+      const svc = new MigrationService(deps);
+
+      await svc.runHistoricalMigration();
+
+      expect(dest.createTicket).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ groupId: 3 }),
+      );
+    });
+
+    it("creates ticket without groupId when assignee group is unmapped", async () => {
+      const agent = makeUser({ sourceId: "agent1", email: "agent@co.com", role: "agent" });
+      const ticket = makeTicket({
+        assigneeSourceId: "agent1",
+        comments: [makeComment()],
+      });
+
+      const source = mockSource();
+      source.fetchUsers.mockResolvedValue(singlePage([makeUser(), agent]));
+      source.fetchTickets.mockResolvedValue(singlePage([ticket]));
+      source.fetchTicketById.mockResolvedValue(ticket);
+
+      const dest = mockDestination();
+      const mappings = mockMappings();
+
+      const agentResolver = new AgentResolver(
+        [{ email: "agent@co.com", agentId: 42 }],
+        mockLogger(),
+      );
+
+      const groupResolver = new GroupResolver(
+        [{ groupName: "Other Group", groupId: 99 }],
+        mockLogger(),
+      );
+      groupResolver.setAgentGroupMap(new Map([["agent@co.com", "Unknown Group"]]));
+
+      const deps = buildDeps({
+        source, destination: dest, mappings, agentResolver, groupResolver,
+      });
+      const svc = new MigrationService(deps);
+
+      await svc.runHistoricalMigration();
+
+      expect(dest.createTicket).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ groupId: undefined }),
+      );
+    });
+
+    it("creates ticket without groupId when no GroupResolver is configured", async () => {
+      const agent = makeUser({ sourceId: "agent1", email: "agent@co.com", role: "agent" });
+      const ticket = makeTicket({
+        assigneeSourceId: "agent1",
+        comments: [makeComment()],
+      });
+
+      const source = mockSource();
+      source.fetchUsers.mockResolvedValue(singlePage([makeUser(), agent]));
+      source.fetchTickets.mockResolvedValue(singlePage([ticket]));
+      source.fetchTicketById.mockResolvedValue(ticket);
+
+      const dest = mockDestination();
+      const mappings = mockMappings();
+
+      const deps = buildDeps({ source, destination: dest, mappings });
+      const svc = new MigrationService(deps);
+
+      await svc.runHistoricalMigration();
+
+      expect(dest.createTicket).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ groupId: undefined }),
+      );
+    });
+  });
+
+  describe("first-comment attachment handling", () => {
+    it("uploads first-comment attachments and passes tokens to createTicket", async () => {
+      const attachment = makeAttachment({ sourceId: "a1" });
+      const firstComment = makeComment({ sourceId: "c0", attachments: [attachment] });
+      const ticket = makeTicket({ comments: [firstComment] });
+
+      const source = mockSource();
+      source.fetchUsers.mockResolvedValue(singlePage([makeUser()]));
+      source.fetchTickets.mockResolvedValue(singlePage([ticket]));
+      source.fetchTicketById.mockResolvedValue(ticket);
+      source.downloadAttachment.mockResolvedValue(Buffer.from("file-data"));
+
+      const dest = mockDestination();
+      dest.uploadAttachment.mockResolvedValue({ destinationId: "token-a1" });
+
+      const mappings = mockMappings();
+      const deps = buildDeps({ source, destination: dest, mappings });
+      const svc = new MigrationService(deps);
+
+      await svc.runHistoricalMigration();
+
+      expect(source.downloadAttachment).toHaveBeenCalledTimes(1);
+      expect(dest.uploadAttachment).toHaveBeenCalledTimes(1);
+      expect(dest.createTicket).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ attachmentTokens: ["token-a1"] }),
+      );
+    });
+
+    it("creates ticket without attachments when first-comment upload fails", async () => {
+      const attachment = makeAttachment({ sourceId: "a1" });
+      const firstComment = makeComment({ sourceId: "c0", attachments: [attachment] });
+      const ticket = makeTicket({ comments: [firstComment] });
+
+      const source = mockSource();
+      source.fetchUsers.mockResolvedValue(singlePage([makeUser()]));
+      source.fetchTickets.mockResolvedValue(singlePage([ticket]));
+      source.fetchTicketById.mockResolvedValue(ticket);
+      source.downloadAttachment.mockRejectedValue(new Error("download failed"));
+
+      const dest = mockDestination();
+      const jobs = mockJobs();
+      const mappings = mockMappings();
+      const deps = buildDeps({ source, destination: dest, mappings, jobs });
+      const svc = new MigrationService(deps);
+
+      const job = await svc.runHistoricalMigration();
+
+      expect(dest.createTicket).toHaveBeenCalledTimes(1);
+      const context = dest.createTicket.mock.calls[0][1] as TicketCreationContext;
+      expect(context.attachmentTokens).toBeUndefined();
+      expect(jobs.addFailedItem).toHaveBeenCalledWith(
+        expect.objectContaining({ entityType: "attachment", sourceId: "a1" }),
+      );
+    });
+
+    it("still processes later-comment attachments separately", async () => {
+      const att1 = makeAttachment({ sourceId: "a1", commentSourceId: "c0" });
+      const att2 = makeAttachment({ sourceId: "a2", commentSourceId: "c1" });
+      const firstComment = makeComment({ sourceId: "c0", attachments: [att1] });
+      const secondComment = makeComment({ sourceId: "c1", attachments: [att2] });
+      const ticket = makeTicket({ comments: [firstComment, secondComment] });
+
+      const source = mockSource();
+      source.fetchUsers.mockResolvedValue(singlePage([makeUser()]));
+      source.fetchTickets.mockResolvedValue(singlePage([ticket]));
+      source.fetchTicketById.mockResolvedValue(ticket);
+      source.downloadAttachment.mockResolvedValue(Buffer.from("file-data"));
+
+      const dest = mockDestination();
+      dest.uploadAttachment
+        .mockResolvedValueOnce({ destinationId: "token-a1" })
+        .mockResolvedValueOnce({ destinationId: "token-a2" });
+
+      const mappings = mockMappings();
+      const deps = buildDeps({ source, destination: dest, mappings });
+      const svc = new MigrationService(deps);
+
+      await svc.runHistoricalMigration();
+
+      expect(dest.uploadAttachment).toHaveBeenCalledTimes(2);
+      expect(dest.createTicket).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ attachmentTokens: ["token-a1"] }),
+      );
+      expect(dest.addComment).toHaveBeenCalledTimes(1);
     });
   });
 });
