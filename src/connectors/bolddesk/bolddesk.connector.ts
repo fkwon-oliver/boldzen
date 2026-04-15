@@ -42,7 +42,7 @@ export interface BoldDeskConfig {
   defaultBrandId: number;
   ticketPortalValue: string;
   topicFieldKey?: string;
-  topicTagToValueMap?: Map<string, string>;
+  topicTagToIdMap?: Map<string, number>;
   taggerTags?: Set<string>;
   zdIdFieldKey?: string;
   logger?: Logger;
@@ -53,7 +53,7 @@ export class BoldDeskConnector implements DestinationConnector {
   private readonly brandId: number;
   private readonly ticketPortalValue: string;
   private readonly topicFieldKey: string | undefined;
-  private readonly topicTagToValueMap: Map<string, string>;
+  private readonly topicTagToIdMap: Map<string, number>;
   private readonly taggerTags: Set<string>;
   private readonly zdIdFieldKey: string | undefined;
   private readonly logger: Logger | undefined;
@@ -63,7 +63,7 @@ export class BoldDeskConnector implements DestinationConnector {
     this.brandId = config.defaultBrandId;
     this.ticketPortalValue = config.ticketPortalValue;
     this.topicFieldKey = config.topicFieldKey || undefined;
-    this.topicTagToValueMap = config.topicTagToValueMap ?? new Map();
+    this.topicTagToIdMap = config.topicTagToIdMap ?? new Map();
     this.taggerTags = config.taggerTags ?? new Set();
     this.zdIdFieldKey = config.zdIdFieldKey || undefined;
     this.logger = config.logger;
@@ -144,9 +144,22 @@ export class BoldDeskConnector implements DestinationConnector {
       : undefined;
 
     const customFields: Record<string, unknown> = {};
-    const topicValue = resolveTopicValue(ticket.customFields, this.topicTagToValueMap);
-    if (topicValue && this.topicFieldKey) {
-      customFields[this.topicFieldKey] = topicValue;
+
+    // Topic: fail-closed — throws TopicMappingError if source tag exists but has no mapping
+    const topicResolution = resolveTopicValue(
+      ticket.customFields, this.topicTagToIdMap, ticket.sourceId,
+    );
+    if (topicResolution && this.topicFieldKey) {
+      customFields[this.topicFieldKey] = topicResolution.bolddeskId;
+      this.logger?.debug(
+        {
+          ticketSourceId: ticket.sourceId,
+          sourceTag: topicResolution.sourceTag,
+          bolddeskId: topicResolution.bolddeskId,
+          topicFieldKey: this.topicFieldKey,
+        },
+        "Topic resolved to BoldDesk dropdown ID",
+      );
     }
 
     if (this.zdIdFieldKey) {
@@ -178,6 +191,20 @@ export class BoldDeskConnector implements DestinationConnector {
       );
     }
 
+    const finalCustomFields = Object.keys(customFields).length > 0 ? customFields : undefined;
+
+    this.logger?.info(
+      {
+        ticketSourceId: ticket.sourceId,
+        topicFieldKey: this.topicFieldKey ?? "(not set)",
+        topicValue: topicResolution ? topicResolution.bolddeskId : "(no source topic)",
+        zdIdFieldKey: this.zdIdFieldKey ?? "(not set)",
+        zdSourceId: ticket.sourceId,
+        customFields: finalCustomFields,
+      },
+      "customFields payload for ticket creation",
+    );
+
     const body: BoldDeskCreateTicketRequest = {
       brandId: this.brandId,
       subject: ticket.subject,
@@ -188,14 +215,13 @@ export class BoldDeskConnector implements DestinationConnector {
       statusId,
       tags: normalizeTags(ticket.tags, this.taggerTags),
       isVisibleInCustomerPortal: true,
-      skipDependencyValidation: true,
       ticketPortalValue: this.ticketPortalValue,
       contactGroupId: context.contactGroupDestId
         ? parseInt(context.contactGroupDestId, 10)
         : undefined,
       agentId: context.assigneeAgentId,
       groupId: context.groupId,
-      customFields: Object.keys(customFields).length > 0 ? customFields : undefined,
+      customFields: finalCustomFields,
       attachments: attachmentTokens?.length
         ? attachmentTokens.join(",")
         : undefined,
@@ -204,6 +230,7 @@ export class BoldDeskConnector implements DestinationConnector {
     const result = await this.client.post<BoldDeskCreateTicketResponse>(
       "/api/v1.0/tickets",
       body,
+      { skipDependencyValidation: true },
     );
 
     return { destinationId: String(result.id) };

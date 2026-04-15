@@ -71,6 +71,7 @@ describe("BoldDeskConnector", () => {
           name: "Alice Smith",
           email: "alice@example.com",
         }),
+        undefined,
       );
     });
 
@@ -88,6 +89,7 @@ describe("BoldDeskConnector", () => {
       expect(http.post).toHaveBeenCalledWith(
         "/api/v1/contacts",
         expect.objectContaining({ email: "alice@example.com" }),
+        undefined,
       );
     });
 
@@ -113,6 +115,7 @@ describe("BoldDeskConnector", () => {
       expect(http.post).toHaveBeenCalledWith(
         "/api/v1/contacts",
         expect.objectContaining({ name: "bob@test.com" }),
+        undefined,
       );
     });
   });
@@ -182,6 +185,7 @@ describe("BoldDeskConnector", () => {
       expect(http.post).toHaveBeenCalledWith(
         "/api/v1/contact_groups",
         expect.objectContaining({ name: "Acme Corp" }),
+        undefined,
       );
     });
   });
@@ -274,6 +278,7 @@ describe("BoldDeskConnector", () => {
       expect(http.post).toHaveBeenCalledWith(
         "/api/v1.0/tickets",
         expect.objectContaining({ priorityId: 2 }),
+        { params: { skipDependencyValidation: true } },
       );
     });
 
@@ -289,6 +294,7 @@ describe("BoldDeskConnector", () => {
       expect(http.post).toHaveBeenCalledWith(
         "/api/v1.0/tickets",
         expect.objectContaining({ contactGroupId: 50 }),
+        { params: { skipDependencyValidation: true } },
       );
     });
 
@@ -313,6 +319,7 @@ describe("BoldDeskConnector", () => {
       expect(http.post).toHaveBeenCalledWith(
         "/api/v1.0/tickets",
         expect.objectContaining({ agentId: 42 }),
+        { params: { skipDependencyValidation: true } },
       );
     });
 
@@ -328,6 +335,7 @@ describe("BoldDeskConnector", () => {
       expect(http.post).toHaveBeenCalledWith(
         "/api/v1.0/tickets",
         expect.objectContaining({ groupId: 3 }),
+        { params: { skipDependencyValidation: true } },
       );
     });
 
@@ -361,6 +369,7 @@ describe("BoldDeskConnector", () => {
       expect(http.post).toHaveBeenCalledWith(
         "/api/v1.0/tickets",
         expect.objectContaining({ attachments: "tok-1,tok-2" }),
+        { params: { skipDependencyValidation: true } },
       );
     });
 
@@ -387,12 +396,12 @@ describe("BoldDeskConnector", () => {
       expect(callBody.attachments).toBeUndefined();
     });
 
-    it("sets Topic in customFields when topic field key is configured", async () => {
+    it("sets Topic in customFields as BoldDesk dropdown ID", async () => {
       const topicConnector = new BoldDeskConnector({
         ...TEST_CONFIG,
         topicFieldKey: "cf_topic",
-        topicTagToValueMap: new Map([
-          ["customer_support", "Customer Support (Question & Answer)"],
+        topicTagToIdMap: new Map([
+          ["customer_support", 22],
         ]),
       });
 
@@ -406,16 +415,33 @@ describe("BoldDeskConnector", () => {
       await topicConnector.createTicket(topicTicket, context);
 
       const callBody = http.post.mock.calls[0][1] as Record<string, unknown>;
-      expect(callBody.customFields).toEqual({
-        cf_topic: "Customer Support (Question & Answer)",
-      });
+      expect(callBody.customFields).toEqual({ cf_topic: 22 });
     });
 
-    it("omits customFields when no topic value resolved", async () => {
+    it("throws when source ticket has a topic tag but no bolddesk_id mapping", async () => {
       const topicConnector = new BoldDeskConnector({
         ...TEST_CONFIG,
         topicFieldKey: "cf_topic",
-        topicTagToValueMap: new Map(),
+        topicTagToIdMap: new Map(),
+      });
+
+      const unmappedTicket: NormalizedTicket = {
+        ...ticket,
+        customFields: { "29599516755099": "unmapped_tag" },
+      };
+
+      await expect(
+        topicConnector.createTicket(unmappedTicket, context),
+      ).rejects.toThrow(/Topic mapping failed/);
+
+      expect(http.post).not.toHaveBeenCalled();
+    });
+
+    it("omits Topic from customFields when source ticket has no topic", async () => {
+      const topicConnector = new BoldDeskConnector({
+        ...TEST_CONFIG,
+        topicFieldKey: "cf_topic",
+        topicTagToIdMap: new Map([["customer_support", 22]]),
       });
 
       http.post.mockResolvedValueOnce({ data: { id: 2001, isFileUploadSuccess: true } });
@@ -474,8 +500,8 @@ describe("BoldDeskConnector", () => {
       const fullConnector = new BoldDeskConnector({
         ...TEST_CONFIG,
         topicFieldKey: "cf_topic",
-        topicTagToValueMap: new Map([
-          ["exam_support", "Exam Support"],
+        topicTagToIdMap: new Map([
+          ["exam_support", 24],
         ]),
         taggerTags: new Set(["exam_support", "wfg"]),
       });
@@ -492,7 +518,7 @@ describe("BoldDeskConnector", () => {
 
       const callBody = http.post.mock.calls[0][1] as Record<string, unknown>;
       expect(callBody.tags).toEqual(["billing"]);
-      expect(callBody.customFields).toEqual({ cf_topic: "Exam Support" });
+      expect(callBody.customFields).toEqual({ cf_topic: 24 });
     });
   });
 

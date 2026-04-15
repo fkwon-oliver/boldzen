@@ -30,9 +30,13 @@ export class BoldDeskClient {
     });
   }
 
-  async post<T>(path: string, body: unknown): Promise<T> {
+  async post<T>(
+    path: string,
+    body: unknown,
+    params?: Record<string, string | number | boolean>,
+  ): Promise<T> {
     return this.requestWithRetry<T>(async () => {
-      const res: AxiosResponse<T> = await this.http.post(path, body);
+      const res: AxiosResponse<T> = await this.http.post(path, body, params ? { params } : undefined);
       return res.data;
     });
   }

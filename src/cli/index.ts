@@ -14,7 +14,7 @@ import { MigrationService } from "../migration/migration.service";
 import { AgentResolver } from "../transform/agent.resolver";
 import { GroupResolver } from "../transform/group.resolver";
 import { loadAgentMappingsFromCSV } from "../transform/agent-csv.loader";
-import { buildTopicTagToValueMap } from "../transform/topic.resolver";
+import { buildTopicTagToIdMap } from "../transform/topic.resolver";
 import { buildTaggerTagSet } from "../transform/tag.normalizer";
 import { ReconciliationService } from "../reconciliation/reconciliation.service";
 import { RetryService } from "../retry/retry.service";
@@ -25,11 +25,11 @@ function buildServices(config: ReturnType<typeof loadConfig>) {
   const pool = getPool(config.database.url);
   const topicsCsvPath = path.resolve(__dirname, "../../", config.migration.topicsCsvPath);
   const orgsCsvPath = path.resolve(__dirname, "../../", config.migration.orgsCsvPath);
-  const topicTagToValueMap = buildTopicTagToValueMap(topicsCsvPath);
+  const topicTagToIdMap = buildTopicTagToIdMap(topicsCsvPath, logger);
   const taggerTags = buildTaggerTagSet(topicsCsvPath, orgsCsvPath);
 
   logger.info(
-    { topicMappings: topicTagToValueMap.size, taggerTags: taggerTags.size },
+    { topicMappings: topicTagToIdMap.size, taggerTags: taggerTags.size },
     "Topic and tagger tag data loaded",
   );
 
@@ -51,7 +51,7 @@ function buildServices(config: ReturnType<typeof loadConfig>) {
   const destination = new BoldDeskConnector({
     ...config.bolddesk,
     topicFieldKey: config.migration.bolddeskTopicFieldKey || undefined,
-    topicTagToValueMap,
+    topicTagToIdMap,
     taggerTags,
     zdIdFieldKey: config.migration.bolddeskZdIdFieldKey || undefined,
     logger,

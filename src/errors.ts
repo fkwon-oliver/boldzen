@@ -51,6 +51,11 @@ export function isTransientError(err: unknown): boolean {
 
   if (err instanceof MigrationError) return false;
 
+  // TopicMappingError is a data-quality issue — never transient
+  if (err && typeof err === "object" && "name" in err && (err as Error).name === "TopicMappingError") {
+    return false;
+  }
+
   // Unknown errors are assumed transient (safe to retry)
   return true;
 }

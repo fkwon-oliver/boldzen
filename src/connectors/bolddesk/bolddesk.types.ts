@@ -76,7 +76,6 @@ export interface BoldDeskCreateTicketRequest {
   groupId?: number;
   tags?: string[];
   isVisibleInCustomerPortal: boolean;
-  skipDependencyValidation?: boolean;
   ticketPortalValue: string;
   /** Comma-separated attachment upload tokens (not an array). */
   attachments?: string;
