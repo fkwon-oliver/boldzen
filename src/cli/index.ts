@@ -15,6 +15,7 @@ import { AgentResolver } from "../transform/agent.resolver";
 import { GroupResolver } from "../transform/group.resolver";
 import { loadAgentMappingsFromCSV } from "../transform/agent-csv.loader";
 import { buildTopicTagToIdMap } from "../transform/topic.resolver";
+import { buildOrganizationTagToIdMap } from "../transform/organization.resolver";
 import { buildTaggerTagSet } from "../transform/tag.normalizer";
 import { ReconciliationService } from "../reconciliation/reconciliation.service";
 import { RetryService } from "../retry/retry.service";
@@ -26,17 +27,29 @@ function buildServices(config: ReturnType<typeof loadConfig>) {
   const topicsCsvPath = path.resolve(__dirname, "../../", config.migration.topicsCsvPath);
   const orgsCsvPath = path.resolve(__dirname, "../../", config.migration.orgsCsvPath);
   const topicTagToIdMap = buildTopicTagToIdMap(topicsCsvPath, logger);
+  const organizationTagToIdMap = buildOrganizationTagToIdMap(orgsCsvPath, logger);
   const taggerTags = buildTaggerTagSet(topicsCsvPath, orgsCsvPath);
 
   logger.info(
-    { topicMappings: topicTagToIdMap.size, taggerTags: taggerTags.size },
-    "Topic and tagger tag data loaded",
+    {
+      topicMappings: topicTagToIdMap.size,
+      organizationMappings: organizationTagToIdMap.size,
+      taggerTags: taggerTags.size,
+    },
+    "Topic, Organization, and tagger tag data loaded",
   );
 
   if (!config.migration.bolddeskTopicFieldKey) {
     logger.warn(
       "BOLDDESK_TOPIC_FIELD_KEY is not set — Topic custom field will NOT be populated on migrated tickets. " +
       "Set this in .env to map Zendesk topics to BoldDesk.",
+    );
+  }
+
+  if (!config.migration.bolddeskOrganizationFieldKey) {
+    logger.warn(
+      "BOLDDESK_ORGANIZATION_FIELD_KEY is not set — Organization custom field will NOT be populated on migrated tickets. " +
+      "Set this in .env to map Zendesk Organization tagger values to BoldDesk.",
     );
   }
 
@@ -52,6 +65,8 @@ function buildServices(config: ReturnType<typeof loadConfig>) {
     ...config.bolddesk,
     topicFieldKey: config.migration.bolddeskTopicFieldKey || undefined,
     topicTagToIdMap,
+    organizationFieldKey: config.migration.bolddeskOrganizationFieldKey || undefined,
+    organizationTagToIdMap,
     taggerTags,
     zdIdFieldKey: config.migration.bolddeskZdIdFieldKey || undefined,
     logger,

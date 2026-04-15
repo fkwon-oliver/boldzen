@@ -6,4 +6,5 @@ export * from "./agent.resolver";
 export * from "./agent-csv.loader";
 export * from "./group.resolver";
 export * from "./topic.resolver";
+export * from "./organization.resolver";
 export * from "./provenance";

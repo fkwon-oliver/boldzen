@@ -35,6 +35,7 @@ export function loadConfig() {
       topicsCsvPath: optional("TOPICS_CSV_PATH", "data/topics.csv"),
       orgsCsvPath: optional("ORGS_CSV_PATH", "data/organizations.csv"),
       bolddeskTopicFieldKey: optional("BOLDDESK_TOPIC_FIELD_KEY", ""),
+      bolddeskOrganizationFieldKey: optional("BOLDDESK_ORGANIZATION_FIELD_KEY", ""),
       bolddeskZdIdFieldKey: optional("BOLDDESK_ZD_ID_FIELD_KEY", ""),
     },
     retry: {

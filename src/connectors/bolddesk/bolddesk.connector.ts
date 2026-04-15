@@ -16,6 +16,7 @@ import { mapTicketStatus } from "../../transform/status.mapper";
 import { mapTicketPriority } from "../../transform/priority.mapper";
 import { normalizeTags } from "../../transform/tag.normalizer";
 import { resolveTopicValue } from "../../transform/topic.resolver";
+import { resolveOrganizationValue } from "../../transform/organization.resolver";
 import {
   buildTicketProvenanceBlock,
   buildCommentProvenanceHeader,
@@ -43,6 +44,8 @@ export interface BoldDeskConfig {
   ticketPortalValue: string;
   topicFieldKey?: string;
   topicTagToIdMap?: Map<string, number>;
+  organizationFieldKey?: string;
+  organizationTagToIdMap?: Map<string, number>;
   taggerTags?: Set<string>;
   zdIdFieldKey?: string;
   logger?: Logger;
@@ -54,6 +57,8 @@ export class BoldDeskConnector implements DestinationConnector {
   private readonly ticketPortalValue: string;
   private readonly topicFieldKey: string | undefined;
   private readonly topicTagToIdMap: Map<string, number>;
+  private readonly organizationFieldKey: string | undefined;
+  private readonly organizationTagToIdMap: Map<string, number>;
   private readonly taggerTags: Set<string>;
   private readonly zdIdFieldKey: string | undefined;
   private readonly logger: Logger | undefined;
@@ -64,6 +69,8 @@ export class BoldDeskConnector implements DestinationConnector {
     this.ticketPortalValue = config.ticketPortalValue;
     this.topicFieldKey = config.topicFieldKey || undefined;
     this.topicTagToIdMap = config.topicTagToIdMap ?? new Map();
+    this.organizationFieldKey = config.organizationFieldKey || undefined;
+    this.organizationTagToIdMap = config.organizationTagToIdMap ?? new Map();
     this.taggerTags = config.taggerTags ?? new Set();
     this.zdIdFieldKey = config.zdIdFieldKey || undefined;
     this.logger = config.logger;
@@ -162,6 +169,42 @@ export class BoldDeskConnector implements DestinationConnector {
       );
     }
 
+    const organizationResolution = resolveOrganizationValue(
+      ticket.customFields, this.organizationTagToIdMap, ticket.sourceId,
+    );
+    const rawZendeskOrgCf = ticket.customFields["33084594878747"];
+    const orgMapLookup =
+      typeof rawZendeskOrgCf === "string"
+        ? this.organizationTagToIdMap.get(rawZendeskOrgCf.trim().toLowerCase())
+        : undefined;
+    this.logger?.info(
+      {
+        ticketSourceId: ticket.sourceId,
+        zendeskOrganizationFieldId: "33084594878747",
+        rawZendeskOrganizationCfValue: rawZendeskOrgCf ?? "(absent)",
+        organizationMapLookupBolddeskId: orgMapLookup ?? "(no row or non-string source)",
+        resolvedSourceOrganizationTag: organizationResolution?.sourceTag ?? null,
+        resolvedOrganizationBolddeskId: organizationResolution?.bolddeskId ?? null,
+        organizationFieldKey: this.organizationFieldKey ?? "(not set)",
+        organizationCustomFieldIncludedInPayload: Boolean(
+          organizationResolution && this.organizationFieldKey,
+        ),
+      },
+      "[org-debug] Organization path — source + CSV lookup + resolution",
+    );
+    if (organizationResolution && this.organizationFieldKey) {
+      customFields[this.organizationFieldKey] = organizationResolution.bolddeskId;
+      this.logger?.debug(
+        {
+          ticketSourceId: ticket.sourceId,
+          sourceOrganizationTag: organizationResolution.sourceTag,
+          bolddeskId: organizationResolution.bolddeskId,
+          organizationFieldKey: this.organizationFieldKey,
+        },
+        "Organization resolved to BoldDesk dropdown ID",
+      );
+    }
+
     if (this.zdIdFieldKey) {
       customFields[this.zdIdFieldKey] = ticket.sourceId;
     }
@@ -196,8 +239,26 @@ export class BoldDeskConnector implements DestinationConnector {
     this.logger?.info(
       {
         ticketSourceId: ticket.sourceId,
+        organizationFieldKey: this.organizationFieldKey ?? "(not set)",
+        sourceOrganizationTag: organizationResolution?.sourceTag ?? "(no source organization)",
+        resolvedOrganizationBolddeskId: organizationResolution
+          ? organizationResolution.bolddeskId
+          : "(no source organization)",
+        finalCustomFieldsPayload: finalCustomFields ?? {},
+      },
+      "[org-debug] createTicket final customFields payload",
+    );
+
+    this.logger?.info(
+      {
+        ticketSourceId: ticket.sourceId,
         topicFieldKey: this.topicFieldKey ?? "(not set)",
         topicValue: topicResolution ? topicResolution.bolddeskId : "(no source topic)",
+        organizationFieldKey: this.organizationFieldKey ?? "(not set)",
+        sourceOrganizationTag: organizationResolution?.sourceTag ?? "(no source organization)",
+        organizationBolddeskId: organizationResolution
+          ? organizationResolution.bolddeskId
+          : "(no source organization)",
         zdIdFieldKey: this.zdIdFieldKey ?? "(not set)",
         zdSourceId: ticket.sourceId,
         customFields: finalCustomFields,

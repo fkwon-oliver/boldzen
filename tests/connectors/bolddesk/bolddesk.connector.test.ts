@@ -520,6 +520,151 @@ describe("BoldDeskConnector", () => {
       expect(callBody.tags).toEqual(["billing"]);
       expect(callBody.customFields).toEqual({ cf_topic: 24 });
     });
+
+    it("sets Organization in customFields as BoldDesk dropdown ID", async () => {
+      const orgConnector = new BoldDeskConnector({
+        ...TEST_CONFIG,
+        organizationFieldKey: "cf_organization",
+        organizationTagToIdMap: new Map([["wfg", 62]]),
+      });
+
+      const orgTicket: NormalizedTicket = {
+        ...ticket,
+        customFields: { "33084594878747": "wfg" },
+      };
+
+      http.post.mockResolvedValueOnce({ data: { id: 2100, isFileUploadSuccess: true } });
+
+      await orgConnector.createTicket(orgTicket, context);
+
+      const callBody = http.post.mock.calls[0][1] as Record<string, unknown>;
+      expect(callBody.customFields).toEqual({ cf_organization: 62 });
+    });
+
+    it("throws when Organization custom field has unknown tag", async () => {
+      const orgConnector = new BoldDeskConnector({
+        ...TEST_CONFIG,
+        organizationFieldKey: "cf_organization",
+        organizationTagToIdMap: new Map([["wfg", 62]]),
+      });
+
+      const badOrgTicket: NormalizedTicket = {
+        ...ticket,
+        customFields: { "33084594878747": "not_in_csv" },
+      };
+
+      await expect(orgConnector.createTicket(badOrgTicket, context)).rejects.toThrow(
+        /Organization field mapping failed/,
+      );
+      expect(http.post).not.toHaveBeenCalled();
+    });
+
+    it("throws Organization mapping error when field key unset but source Organization is unmapped", async () => {
+      const orgConnector = new BoldDeskConnector({
+        ...TEST_CONFIG,
+        organizationTagToIdMap: new Map(),
+      });
+
+      const badOrgTicket: NormalizedTicket = {
+        ...ticket,
+        customFields: { "33084594878747": "wfg" },
+      };
+
+      await expect(orgConnector.createTicket(badOrgTicket, context)).rejects.toThrow(
+        /Organization field mapping failed/,
+      );
+      expect(http.post).not.toHaveBeenCalled();
+    });
+
+    it("omits Organization from customFields when source ticket has no Organization field", async () => {
+      const orgConnector = new BoldDeskConnector({
+        ...TEST_CONFIG,
+        organizationFieldKey: "cf_organization",
+        organizationTagToIdMap: new Map([["wfg", 62]]),
+      });
+
+      http.post.mockResolvedValueOnce({ data: { id: 2101, isFileUploadSuccess: true } });
+
+      await orgConnector.createTicket(ticket, context);
+
+      const callBody = http.post.mock.calls[0][1] as Record<string, unknown>;
+      expect(callBody.customFields).toBeUndefined();
+    });
+
+    it("adds Organization custom field without breaking contactGroupId", async () => {
+      const orgConnector = new BoldDeskConnector({
+        ...TEST_CONFIG,
+        organizationFieldKey: "cf_organization",
+        organizationTagToIdMap: new Map([["wfg", 62]]),
+      });
+
+      const orgTicket: NormalizedTicket = {
+        ...ticket,
+        customFields: { "33084594878747": "wfg" },
+      };
+
+      http.post.mockResolvedValueOnce({ data: { id: 2102, isFileUploadSuccess: true } });
+
+      await orgConnector.createTicket(orgTicket, {
+        ...context,
+        contactGroupDestId: "99",
+      });
+
+      const callBody = http.post.mock.calls[0][1] as Record<string, unknown>;
+      expect(callBody.contactGroupId).toBe(99);
+      expect(callBody.customFields).toEqual({ cf_organization: 62 });
+    });
+
+    it("does not duplicate Organization tagger tag in tags", async () => {
+      const orgConnector = new BoldDeskConnector({
+        ...TEST_CONFIG,
+        organizationFieldKey: "cf_organization",
+        organizationTagToIdMap: new Map([["wfg", 62]]),
+        taggerTags: new Set(["wfg"]),
+      });
+
+      const orgTicket: NormalizedTicket = {
+        ...ticket,
+        tags: ["wfg", "billing", "vip"],
+        customFields: { "33084594878747": "wfg" },
+      };
+
+      http.post.mockResolvedValueOnce({ data: { id: 2103, isFileUploadSuccess: true } });
+
+      await orgConnector.createTicket(orgTicket, context);
+
+      const callBody = http.post.mock.calls[0][1] as Record<string, unknown>;
+      expect(callBody.tags).toEqual(["billing", "vip"]);
+      expect(callBody.customFields).toEqual({ cf_organization: 62 });
+    });
+
+    it("keeps Topic mapping when Organization is also set", async () => {
+      const fullConnector = new BoldDeskConnector({
+        ...TEST_CONFIG,
+        topicFieldKey: "cf_topic",
+        topicTagToIdMap: new Map([["exam_support", 24]]),
+        organizationFieldKey: "cf_organization",
+        organizationTagToIdMap: new Map([["wfg", 62]]),
+      });
+
+      const bothTicket: NormalizedTicket = {
+        ...ticket,
+        customFields: {
+          "29599516755099": "exam_support",
+          "33084594878747": "wfg",
+        },
+      };
+
+      http.post.mockResolvedValueOnce({ data: { id: 2104, isFileUploadSuccess: true } });
+
+      await fullConnector.createTicket(bothTicket, context);
+
+      const callBody = http.post.mock.calls[0][1] as Record<string, unknown>;
+      expect(callBody.customFields).toEqual({
+        cf_topic: 24,
+        cf_organization: 62,
+      });
+    });
   });
 
   // ── addComment ─────────────────────────────────────────
